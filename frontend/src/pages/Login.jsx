@@ -1,14 +1,27 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
-  const { login }  = useAuth()
-  const navigate   = useNavigate()
+  const { login, user, loading } = useAuth()
+  const navigate                 = useNavigate()
+  const location                 = useLocation()
+
   const [form, setForm]       = useState({ email: '', password: '' })
   const [error, setError]     = useState('')
-  const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [showPw, setShowPw]   = useState(false)
+
+  // If user is already logged in and visits /login,
+  // redirect them to their dashboard automatically
+  useEffect(() => {
+    if (!loading && user) {
+      const dest = location.state?.from?.pathname ||
+        (user.role === 'admin'     ? '/admin-dashboard' :
+         user.role === 'recruiter' ? '/my-jobs'         : '/jobs')
+      navigate(dest, { replace: true })
+    }
+  }, [user, loading])
 
   const handleChange = e =>
     setForm({ ...form, [e.target.name]: e.target.value })
@@ -16,20 +29,55 @@ export default function Login() {
   const handleSubmit = async e => {
     e.preventDefault()
     setError('')
-    setLoading(true)
+    setSubmitting(true)
+
     try {
-      const user = await login(form.email, form.password)
-      if (user.role === 'admin')          navigate('/admin-dashboard')
-      else if (user.role === 'recruiter') navigate('/my-jobs')
-      else                                navigate('/jobs')
+      const loggedInUser = await login(form.email, form.password)
+
+      // Navigate based on role
+      const dest =
+        loggedInUser.role === 'admin'     ? '/admin-dashboard' :
+        loggedInUser.role === 'recruiter' ? '/my-jobs'         :
+                                            '/jobs'
+
+      navigate(dest, { replace: true })
+
     } catch (err) {
-      setError(
-        err.response?.data?.detail ||
-        'Invalid email or password. Please try again.'
-      )
+      // Detailed error logging to help debug
+      console.error('[Login] error:', err)
+      console.error('[Login] response:', err.response?.data)
+      console.error('[Login] status:', err.response?.status)
+
+      if (err.response?.status === 401) {
+        setError('Invalid email or password.')
+      } else if (err.response?.status === 400) {
+        const data = err.response.data
+        setError(
+          data?.detail ||
+          Object.values(data).flat().join(' ') ||
+          'Login failed. Check your credentials.'
+        )
+      } else if (!err.response) {
+        setError(
+          'Cannot connect to server. ' +
+          'Make sure Django is running on http://localhost:8000'
+        )
+      } else {
+        setError(err.message || 'Login failed. Please try again.')
+      }
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
+  }
+
+  // Show loading spinner while checking existing session
+  if (loading) {
+    return (
+      <div className="auth-wrapper">
+        <div className="spinner-border"
+             style={{ color: 'var(--brand-primary)' }} />
+      </div>
+    )
   }
 
   return (
@@ -38,8 +86,7 @@ export default function Login() {
         <div className="auth-header">
           <Link to="/"
                 style={{ textDecoration: 'none',
-                         fontSize: '1rem',
-                         fontWeight: 700,
+                         fontSize: '1rem', fontWeight: 700,
                          color: 'var(--text-primary)' }}>
             TalentHub
           </Link>
@@ -49,12 +96,14 @@ export default function Login() {
 
         {error && (
           <div
-            className="alert mb-4 py-2"
-            style={{ background: '#fee2e2',
-                     border: '1px solid #fecaca',
-                     borderRadius: 'var(--radius-sm)',
-                     color: '#991b1b',
-                     fontSize: '0.875rem' }}
+            className="mb-4 p-3"
+            style={{
+              background:    '#fee2e2',
+              border:        '1px solid #fecaca',
+              borderRadius:  'var(--radius-sm)',
+              color:         '#991b1b',
+              fontSize:      '0.875rem',
+            }}
           >
             {error}
           </div>
@@ -70,6 +119,7 @@ export default function Login() {
               value={form.email}
               onChange={handleChange}
               required autoFocus
+              disabled={submitting}
             />
           </div>
 
@@ -84,6 +134,7 @@ export default function Login() {
                 value={form.password}
                 onChange={handleChange}
                 required
+                disabled={submitting}
               />
               <button
                 type="button"
@@ -101,26 +152,41 @@ export default function Login() {
           <button
             type="submit"
             className="btn btn-primary w-100"
-            disabled={loading}
+            disabled={submitting}
           >
-            {loading
-              ? <><span className="spinner-border spinner-border-sm me-2"/>
-                  Signing in...</>
+            {submitting
+              ? <>
+                  <span className="spinner-border spinner-border-sm me-2" />
+                  Signing in...
+                </>
               : 'Sign in'
             }
           </button>
         </form>
 
-        <p className="text-center mt-4 mb-0 text-sm"
-           style={{ color: 'var(--text-muted)' }}>
+        <p className="text-center mt-4 mb-0"
+           style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
           Don't have an account?{' '}
           <Link to="/register"
                 style={{ color: 'var(--brand-primary)',
-                         fontWeight: 500,
-                         textDecoration: 'none' }}>
+                         fontWeight: 500, textDecoration: 'none' }}>
             Create one
           </Link>
         </p>
+
+        {/* Debug helper — REMOVE before production */}
+        {process.env.NODE_ENV === 'development' && (
+          <div style={{ marginTop: '1.5rem',
+                        padding: '0.75rem',
+                        background: '#f8fafc',
+                        border: '1px solid var(--surface-border)',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-muted)' }}>
+            <strong>Debug:</strong> API →{' '}
+            {import.meta.env.VITE_API_BASE_URL || 'NOT SET'}
+          </div>
+        )}
       </div>
     </div>
   )
